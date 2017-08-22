@@ -75,9 +75,27 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_score = float("inf")
+        best_model = None
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for num_states in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000, random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                logL = model.score(self.X, self.lengths)
+
+                parameters = num_states * num_states + 2 * num_states * len(self.X[0]) - 1
+                bic = (-2) * logL + math.log(len(self.X)) * parameters
+
+                if bic < best_score:
+                    best_score = bic
+                    best_model = model
+
+            except:
+                pass
+
+        return best_model
+
+      
 
 
 class SelectorDIC(ModelSelector):
@@ -91,18 +109,106 @@ class SelectorDIC(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        n_components = range(self.min_n_components,self.max_n_components+1)
+        best_n = self.random_state
+        best_DIC = float('-inf')
+        best_model = None
+        
+        for n in n_components:
+            try:
+                w_count = 0
+                model = GaussianHMM(n,n_iter=1000).fit(self.X,self.lengths)
+                original_prob = model.score(self.X,self.lengths)
+                
+                sum_prob_others = 0.0
+                
+                for word in self.words: 
+                    if word==self.this_word:
+                        continue
+                        
+                    X_other, lengths_other = self.hwords[word]  
+                    #other_model = GaussianHMM(n,n_iter=1000).fit(X_other,lengths_other) #Edited-commented
+                    logL = model.score(X_other,lengths_other)
+                    sum_prob_others += logL
+                    w_count = w_count + 1
+                
+                avg_prob_others = sum_prob_others/w_count 
+                DIC = original_prob - avg_prob_others
+                #print('num_comp: {} for DIC:'.format(n,DIC))
+              
+                if DIC > best_DIC:
+                    best_DIC=DIC
+                    best_n = n
+            except:
+                pass
+        
+        
+        #if (len(self.lengths) == 1):
+        #    #and (self.lengths[0] <= (len(self.X))/2):
+        #    print ("length is equal. Can we process it? " + "length <= " + str(self.lengths[0]) + " X " + str(len(self.X)/2) )
+        #    print (self.X, self.lengths)
+        try:
+            best_model = GaussianHMM(best_n, n_iter=1000).fit(self.X, self.lengths)
+        except ValueError:
+            print ("length is equal. Can we process it? " + "length <= " + str(self.lengths[0]) + " X " + str(len(self.X)) )
+            #print ("Clusters is " + best_model.n_components)
+            print (self.X, self.lengths)
+            best_model = None
+        print ("Exiting...")
+        return best_model
 
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
+	
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
+        #print ("Test")
+        #print (self.sequences)
         # TODO implement model selection using CV
-        raise NotImplementedError
+        best_score = float('-inf')
+        
+        n_splits=min(3,len(self.sequences))
+        
+        best_model =  None
+        if n_splits <= 1:
+            return best_model
+        split_method = KFold(n_splits)
+ 
+        for num_of_states in range(self.min_n_components, self.max_n_components +1):
+            folds = 0
+            total_logL= 0
+            
+            try:
+                if self.sequences == 1:
+                    continue
+                if len(self.sequences) < split_method.n_splits:
+                    continue;
+
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    folds +=1
+                    X_train, lengths_train = combine_sequences(cv_train_idx, self.sequences)
+                    X_test, lengths_test = combine_sequences(cv_test_idx, self.sequences)
+                    model = GaussianHMM(n_components=num_of_states ,  n_iter=1000).fit(X_train,lengths_train)
+                    fold_score = model.score(X_test,lengths_test)
+
+                    total_logL += fold_score
+
+                avg_logL = total_logL /folds
+
+                if best_score < avg_logL:
+                    best_score = avg_logL
+                
+                    best_model= model                   
+            except Exception as inst:
+                print("Exception caught")
+                print (n_splits)
+               
+                print(type(inst))
+                print(inst.args)
+                pass
+
+        return best_model
